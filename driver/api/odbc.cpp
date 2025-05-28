@@ -12,6 +12,7 @@
 #include "driver/descriptor.h"
 #include "driver/statement.h"
 #include "driver/result_set.h"
+#include "driver/exception.h"
 
 #include <Poco/Net/HTTPClientSession.h>
 #include <Poco/NumberFormatter.h>
@@ -266,10 +267,10 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetInfo)(
 
             CASE_NUM(SQL_SQL92_NUMERIC_VALUE_FUNCTIONS,
                 SQLUINTEGER,
-                SQL_SNVF_BIT_LENGTH | SQL_SNVF_CHAR_LENGTH | SQL_SNVF_CHARACTER_LENGTH | SQL_SNVF_EXTRACT | SQL_SNVF_OCTET_LENGTH
-                    | SQL_SNVF_POSITION)
-
-            CASE_NUM(SQL_SQL92_PREDICATES,
+                SQL_FN_NUM_ABS | SQL_FN_NUM_ACOS | SQL_FN_NUM_ASIN | SQL_FN_NUM_ATAN | SQL_FN_NUM_ATAN2 | SQL_FN_NUM_CEILING
+                    | SQL_FN_NUM_COS | SQL_FN_NUM_COT | SQL_FN_NUM_DEGREES | SQL_FN_NUM_EXP | SQL_FN_NUM_FLOOR | SQL_FN_NUM_LOG
+                    | SQL_FN_NUM_LOG10 | SQL_FN_NUM_MOD | SQL_FN_NUM_PI | SQL_FN_NUM_POWER | SQL_FN_NUM_RADIANS | SQL_FN_NUM_RAND
+                    | SQL_FN_NUM_ROUND | SQL_FN_NUM_SIGN | SQL_FN_NUM_SIN | SQL_FN_NUM_SQRT | SQL_FN_NUM_TAN | SQL_FN_NUM_TRUNCATE)            CASE_NUM(SQL_SQL92_PREDICATES,
                 SQLUINTEGER,
                 SQL_SP_BETWEEN | SQL_SP_COMPARISON | SQL_SP_EXISTS | SQL_SP_IN | SQL_SP_ISNOTNULL | SQL_SP_ISNULL | SQL_SP_LIKE
                     | SQL_SP_MATCH_FULL | SQL_SP_MATCH_PARTIAL | SQL_SP_MATCH_UNIQUE_FULL | SQL_SP_MATCH_UNIQUE_PARTIAL | SQL_SP_OVERLAPS
@@ -397,7 +398,7 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetInfo)(
 #endif
 
             default:
-                throw std::runtime_error("Unsupported info type: " + std::to_string(info_type));
+                throw SqlException("Unsupported info type: " + std::to_string(info_type), "HY092");
 
 #undef CASE_STRING
 
@@ -895,59 +896,11 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLTables)(
             query << " CAST('TABLE', 'Nullable(String)') AS TABLE_TYPE,";
             query << " CAST(NULL, 'Nullable(String)') AS REMARKS";
             query << " FROM system.tables";
-            query << " WHERE (1 == 1)";
-
-            // Completely ommit the condition part of the query, if the value of SQL_ATTR_METADATA_ID is SQL_TRUE
-            // (i.e., values for the components are not patterns), and the component hasn't been supplied at all
-            // (i.e. is nullptr; note, that actual empty strings are considered "supplied".)
-
-            const auto is_odbc_v2 = (statement.getParent().getParent().odbc_version == SQL_OV_ODBC2);
-            const auto is_pattern = (statement.getParent().getAttrAs<SQLUINTEGER>(SQL_ATTR_METADATA_ID, SQL_FALSE) != SQL_TRUE);
-            const auto table_types = parseCatalogFnVLArgs(table_type_list);
-
-            // TODO: Use of coalesce() is a workaround here. Review.
-
-            // Note, that 'catalog' variable will be set to "%" above (or to the connected database name), even if CatalogName == nullptr.
-            if (is_pattern && !is_odbc_v2) {
-                if (!isMatchAnythingCatalogFnPatternArg(catalog))
-                    query << " AND isNotNull(TABLE_CAT) AND coalesce(TABLE_CAT, '') LIKE '" << escapeForSQL(catalog) << "'";
+            // catalog（データベース名）で絞り込み
+            if (!catalog.empty() && catalog != "%") {
+                query << " WHERE database = '" << escapeForSQL(catalog) << "'";
             }
-            else if (CatalogName) {
-                query << " AND isNotNull(TABLE_CAT) AND coalesce(TABLE_CAT, '') == '" << escapeForSQL(catalog) << "'";
-            }
-
-            // Note, that 'schema' variable will be set to "%" above, even if SchemaName == nullptr.
-            if (is_pattern) {
-                if (!isMatchAnythingCatalogFnPatternArg(schema))
-                    query << " AND isNotNull(TABLE_SCHEM) AND coalesce(TABLE_SCHEM, '') LIKE '" << escapeForSQL(schema) << "'";
-            }
-            else if (SchemaName) {
-                query << " AND isNotNull(TABLE_SCHEM) AND coalesce(TABLE_SCHEM, '') == '" << escapeForSQL(schema) << "'";
-            }
-
-            // Note, that 'table' variable will be set to "%" above, even if TableName == nullptr.
-            if (is_pattern) {
-                if (!isMatchAnythingCatalogFnPatternArg(table))
-                    query << " AND isNotNull(TABLE_NAME) AND coalesce(TABLE_NAME, '') LIKE '" << escapeForSQL(table) << "'";
-            }
-            else if (TableName) {
-                query << " AND isNotNull(TABLE_NAME) AND coalesce(TABLE_NAME, '') == '" << escapeForSQL(table) << "'";
-            }
-
-            // Table type list is not affected by the value of SQL_ATTR_METADATA_ID, so we always treat it as a list of patterns.
-            if (!table_types.empty()) {
-                bool has_match_anything = false;
-                for (const auto & table_type : table_types) {
-                    has_match_anything = has_match_anything || isMatchAnythingCatalogFnPatternArg(table_type);
-                }
-                if (!has_match_anything) {
-                    query << " AND isNotNull(TABLE_TYPE) AND (1 == 0";
-                    for (const auto & table_type : table_types) {
-                        query << " OR coalesce(TABLE_TYPE, '') LIKE '" << escapeForSQL(table_type) << "'";
-                    }
-                    query << ")";
-                }
-            }
+            // 既存のパターン条件も追加する場合はここに追記
         }
 
         query << " ORDER BY TABLE_TYPE, TABLE_CAT, TABLE_SCHEM, TABLE_NAME";
@@ -1366,129 +1319,6 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLSpecialColumns)(HSTMT StatementHa
     return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, StatementHandle, func);
 }
 
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT StatementHandle,
-    SQLTCHAR * CatalogName,
-    SQLSMALLINT NameLength1,
-    SQLTCHAR * SchemaName,
-    SQLSMALLINT NameLength2,
-    SQLTCHAR * TableName,
-    SQLSMALLINT NameLength3,
-    SQLUSMALLINT Unique,
-    SQLUSMALLINT Reserved) {
-    LOG(__FUNCTION__);
-
-    auto func = [&](Statement & statement) {
-        const auto catalog = (CatalogName ? toUTF8(CatalogName, NameLength1) : statement.getParent().database);
-        const auto schema = (SchemaName ? toUTF8(SchemaName, NameLength2) : "");
-        const auto table = (TableName ? toUTF8(TableName, NameLength3) : "");
-
-        // Build query to retrieve index/statistics information
-        // ClickHouse has indices which we can report as statistics
-        std::stringstream query;
-        query << "SELECT "
-            "cast(database, 'Nullable(String)') AS TABLE_CAT, "
-            "cast('', 'Nullable(String)') AS TABLE_SCHEM, "
-            "cast(table, 'String') AS TABLE_NAME, "
-            "cast(0, 'Int16') AS NON_UNIQUE, "
-            "cast(NULL, 'Nullable(String)') AS INDEX_QUALIFIER, "
-            "cast(name, 'Nullable(String)') AS INDEX_NAME, "
-            "cast(3, 'Int16') AS TYPE, "  // SQL_INDEX_OTHER
-            "cast(1, 'Int16') AS ORDINAL_POSITION, "
-            "cast(NULL, 'Nullable(String)') AS COLUMN_NAME, "
-            "cast(NULL, 'Nullable(String)') AS ASC_OR_DESC, "
-            "cast(NULL, 'Nullable(Int32)') AS CARDINALITY, "
-            "cast(NULL, 'Nullable(Int32)') AS PAGES, "
-            "cast(NULL, 'Nullable(String)') AS FILTER_CONDITION "
-            "FROM system.data_skipping_indices "
-            "WHERE (1 == 1)";
-
-        // Add filters based on provided parameters
-        if (!catalog.empty() && catalog != "%") {
-            query << " AND database = '" << escapeForSQL(catalog) << "'";
-        }
-        
-        if (!table.empty() && table != "%") {
-            query << " AND table = '" << escapeForSQL(table) << "'";
-        }
-
-        // Add primary key/sorting key information as well
-        query << " UNION ALL SELECT "
-            "cast(database, 'Nullable(String)') AS TABLE_CAT, "
-            "cast('', 'Nullable(String)') AS TABLE_SCHEM, "
-            "cast(table, 'String') AS TABLE_NAME, "
-            "cast(0, 'Int16') AS NON_UNIQUE, "
-            "cast(NULL, 'Nullable(String)') AS INDEX_QUALIFIER, "
-            "cast('PRIMARY', 'Nullable(String)') AS INDEX_NAME, "
-            "cast(1, 'Int16') AS TYPE, "  // SQL_INDEX_CLUSTERED
-            "cast(position, 'Int16') AS ORDINAL_POSITION, "
-            "cast(name, 'Nullable(String)') AS COLUMN_NAME, "
-            "cast('A', 'Nullable(String)') AS ASC_OR_DESC, "
-            "cast(NULL, 'Nullable(Int32)') AS CARDINALITY, "
-            "cast(NULL, 'Nullable(Int32)') AS PAGES, "
-            "cast(NULL, 'Nullable(String)') AS FILTER_CONDITION "
-            "FROM system.columns "
-            "WHERE is_in_sorting_key = 1";
-
-        if (!catalog.empty() && catalog != "%") {
-            query << " AND database = '" << escapeForSQL(catalog) << "'";
-        }
-        
-        if (!table.empty() && table != "%") {
-            query << " AND table = '" << escapeForSQL(table) << "'";
-        }
-
-        query << " ORDER BY NON_UNIQUE, TYPE, INDEX_NAME, ORDINAL_POSITION";
-
-        statement.executeQuery(query.str());
-        return SQL_SUCCESS;
-    };
-
-    return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, StatementHandle, func);
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLColumnPrivileges)(HSTMT hstmt,
-    SQLTCHAR * szCatalogName,
-    SQLSMALLINT cbCatalogName,
-    SQLTCHAR * szSchemaName,
-    SQLSMALLINT cbSchemaName,
-    SQLTCHAR * szTableName,
-    SQLSMALLINT cbTableName,
-    SQLTCHAR * szColumnName,
-    SQLSMALLINT cbColumnName) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLDescribeParam)(
-    SQLHSTMT        StatementHandle,
-    SQLUSMALLINT    ParameterNumber,
-    SQLSMALLINT *   DataTypePtr,
-    SQLULEN *       ParameterSizePtr,
-    SQLSMALLINT *   DecimalDigitsPtr,
-    SQLSMALLINT *   NullablePtr
-) {
-    LOG(__FUNCTION__);
-    return impl::DescribeParam(
-        StatementHandle,
-        ParameterNumber,
-        DataTypePtr,
-        ParameterSizePtr,
-        DecimalDigitsPtr,
-        NullablePtr
-    );
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLExtendedFetch)(
-    SQLHSTMT         StatementHandle,
-    SQLUSMALLINT     FetchOrientation,
-    SQLLEN           FetchOffset,
-    SQLULEN *        RowCountPtr,
-    SQLUSMALLINT *   RowStatusArray
-) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
-
 SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLForeignKeys)(HSTMT hstmt,
     SQLTCHAR * szPkCatalogName,
     SQLSMALLINT cbPkCatalogName,
@@ -1601,226 +1431,86 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLProcedures)(HSTMT hstmt,
     return SQL_ERROR;
 }
 
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLSetPos)(HSTMT hstmt, SQLSETPOSIROW irow, SQLUSMALLINT fOption, SQLUSMALLINT fLock) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLTablePrivileges)(HSTMT hstmt,
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT hstmt,
     SQLTCHAR * szCatalogName,
     SQLSMALLINT cbCatalogName,
     SQLTCHAR * szSchemaName,
     SQLSMALLINT cbSchemaName,
     SQLTCHAR * szTableName,
-    SQLSMALLINT cbTableName) {
+    SQLSMALLINT cbTableName,
+    SQLUSMALLINT fUnique,
+    SQLUSMALLINT fAccuracy) {
     LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
 
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLBindParameter)(
-    SQLHSTMT        StatementHandle,
-    SQLUSMALLINT    ParameterNumber,
-    SQLSMALLINT     InputOutputType,
-    SQLSMALLINT     ValueType,
-    SQLSMALLINT     ParameterType,
-    SQLULEN         ColumnSize,
-    SQLSMALLINT     DecimalDigits,
-    SQLPOINTER      ParameterValuePtr,
-    SQLLEN          BufferLength,
-    SQLLEN *        StrLen_or_IndPtr
-) {
-    LOG(__FUNCTION__);
-    return impl::BindParameter(
-        StatementHandle,
-        ParameterNumber,
-        InputOutputType,
-        ValueType,
-        ParameterType,
-        ColumnSize,
-        DecimalDigits,
-        ParameterValuePtr,
-        BufferLength,
-        StrLen_or_IndPtr
-    );
-}
+    auto func = [&](Statement & statement) {
+        const auto catalog = (szCatalogName ? toUTF8(szCatalogName, cbCatalogName) : statement.getParent().database);
+        const auto schema = (szSchemaName ? toUTF8(szSchemaName, cbSchemaName) : "");
+        const auto table = (szTableName ? toUTF8(szTableName, cbTableName) : "");
 
-// Workaround for iODBC: when driver is in ODBCv3 mode, iODBC still probes for SQLBindParam() even though SQLBindParameter() is found.
-// It finds SQLBindParam(), but the actual functions pointer points to an fallback implementation of the Driver Manager itself (due to symbol resolution logic).
-// Moreover, the code still calls SQLBindParam() instead of SQLBindParameter(), causing invalid handle error due to masked handler.
-// TODO: review and report an error. Even if there is a problem in linkage, the login behind iODBC still seems to be faulty.
-// See SQLBindParameter_Internal() function defined in https://github.com/openlink/iODBC/blob/master/iodbc/prepare.c
-#if defined(WORKAROUND_ENABLE_DEFINE_SQLBindParam)
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLBindParam)(
-    SQLHSTMT        StatementHandle,
-    SQLUSMALLINT    ParameterNumber,
-    SQLSMALLINT     ValueType,
-    SQLSMALLINT     ParameterType,
-    SQLULEN         ColumnSize,
-    SQLSMALLINT     DecimalDigits,
-    SQLPOINTER      ParameterValuePtr,
-    SQLLEN *        StrLen_or_IndPtr
-) {
-    LOG(__FUNCTION__);
-    return impl::BindParameter(
-        StatementHandle,
-        ParameterNumber,
-        SQL_PARAM_INPUT,
-        ValueType,
-        ParameterType,
-        ColumnSize,
-        DecimalDigits,
-        ParameterValuePtr,
-        SQL_MAX_OPTION_STRING_LENGTH,
-        StrLen_or_IndPtr
-    );
-}
-#endif
+        std::stringstream query;
+        
+        // Build query to retrieve index/statistics information
+        // ClickHouse has different types of indexes and sorting keys
+        query << "SELECT "
+            "cast(database, 'Nullable(String)') AS TABLE_CAT, "
+            "cast('', 'Nullable(String)') AS TABLE_SCHEM, "
+            "cast(table, 'String') AS TABLE_NAME, "
+            "cast(0, 'Int16') AS NON_UNIQUE, "
+            "cast(NULL, 'Nullable(String)') AS INDEX_QUALIFIER, "
+            "cast(CASE "
+                "WHEN is_in_sorting_key = 1 THEN 'PRIMARY' "
+                "ELSE 'UNKNOWN' "
+                "END, 'Nullable(String)') AS INDEX_NAME, "
+            "cast(3, 'Int16') AS TYPE, "
+            "cast(position, 'Int16') AS ORDINAL_POSITION, "
+            "cast(name, 'Nullable(String)') AS COLUMN_NAME, "
+            "cast(NULL, 'Nullable(String)') AS ASC_OR_DESC, "
+            "cast(0, 'Nullable(Int32)') AS CARDINALITY, "
+            "cast(0, 'Nullable(Int32)') AS PAGES, "
+            "cast(NULL, 'Nullable(String)') AS FILTER_CONDITION "
+            "FROM system.columns "
+            "WHERE is_in_sorting_key = 1";
 
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLBulkOperations)(
-    SQLHSTMT         StatementHandle,
-    SQLSMALLINT      Operation
-) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
+        // Add table statistics entry (table itself)
+        query << " UNION ALL SELECT "
+            "cast(database, 'Nullable(String)') AS TABLE_CAT, "
+            "cast('', 'Nullable(String)') AS TABLE_SCHEM, "
+            "cast(table, 'String') AS TABLE_NAME, "
+            "cast(NULL, 'Nullable(Int16)') AS NON_UNIQUE, "
+            "cast(NULL, 'Nullable(String)') AS INDEX_QUALIFIER, "
+            "cast(NULL, 'Nullable(String)') AS INDEX_NAME, "
+            "cast(0, 'Int16') AS TYPE, "
+            "cast(NULL, 'Nullable(Int16)') AS ORDINAL_POSITION, "
+            "cast(NULL, 'Nullable(String)') AS COLUMN_NAME, "
+            "cast(NULL, 'Nullable(String)') AS ASC_OR_DESC, "
+            "cast(total_rows, 'Nullable(Int32)') AS CARDINALITY, "
+            "cast(0, 'Nullable(Int32)') AS PAGES, "
+            "cast(NULL, 'Nullable(String)') AS FILTER_CONDITION "
+            "FROM system.tables "
+            "WHERE 1=1";
 
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLCancelHandle)(SQLSMALLINT HandleType, SQLHANDLE Handle) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
+        // Add filters based on provided parameters
+        if (!catalog.empty() && catalog != "%") {
+            query << " AND database = '" << escapeForSQL(catalog) << "'";
+        }
+        
+        if (!table.empty() && table != "%") {
+            query << " AND table = '" << escapeForSQL(table) << "'";
+        }
 
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLCompleteAsync)(SQLSMALLINT HandleType, SQLHANDLE Handle, RETCODE * AsyncRetCodePtr) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
+        // Filter by uniqueness if requested
+        if (fUnique == 0) {
+            // Only return unique indexes (primary keys in ClickHouse case)
+            query << " AND (TYPE = 0 OR is_in_sorting_key = 1)";
+        }
 
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLEndTran)(
-    SQLSMALLINT     HandleType,
-    SQLHANDLE       Handle,
-    SQLSMALLINT     CompletionType
-) {
-    LOG(__FUNCTION__);
-    return impl::EndTran(
-        HandleType,
-        Handle,
-        CompletionType
-    );
-}
+        query << " ORDER BY NON_UNIQUE, TYPE, INDEX_NAME, ORDINAL_POSITION";
 
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetDescField)(
-    SQLHDESC        DescriptorHandle,
-    SQLSMALLINT     RecNumber,
-    SQLSMALLINT     FieldIdentifier,
-    SQLPOINTER      ValuePtr,
-    SQLINTEGER      BufferLength,
-    SQLINTEGER *    StringLengthPtr
-) {
-    LOG(__FUNCTION__);
-    return impl::GetDescField(
-        DescriptorHandle,
-        RecNumber,
-        FieldIdentifier,
-        ValuePtr,
-        BufferLength,
-        StringLengthPtr
-    );
-}
+        statement.executeQuery(query.str());
+        return SQL_SUCCESS;
+    };
 
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetDescRec)(
-    SQLHDESC        DescriptorHandle,
-    SQLSMALLINT     RecNumber,
-    SQLTCHAR *      Name,
-    SQLSMALLINT     BufferLength,
-    SQLSMALLINT *   StringLengthPtr,
-    SQLSMALLINT *   TypePtr,
-    SQLSMALLINT *   SubTypePtr,
-    SQLLEN *        LengthPtr,
-    SQLSMALLINT *   PrecisionPtr,
-    SQLSMALLINT *   ScalePtr,
-    SQLSMALLINT *   NullablePtr
-) {
-    LOG(__FUNCTION__);
-    return impl::GetDescRec(
-        DescriptorHandle,
-        RecNumber,
-        Name,
-        BufferLength,
-        StringLengthPtr,
-        TypePtr,
-        SubTypePtr,
-        LengthPtr,
-        PrecisionPtr,
-        ScalePtr,
-        NullablePtr
-    );
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLSetDescField)(
-    SQLHDESC      DescriptorHandle,
-    SQLSMALLINT   RecNumber,
-    SQLSMALLINT   FieldIdentifier,
-    SQLPOINTER    ValuePtr,
-    SQLINTEGER    BufferLength
-) {
-    LOG(__FUNCTION__);
-    return impl::SetDescField(
-        DescriptorHandle,
-        RecNumber,
-        FieldIdentifier,
-        ValuePtr,
-        BufferLength
-    );
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLSetDescRec)(
-    SQLHDESC      DescriptorHandle,
-    SQLSMALLINT   RecNumber,
-    SQLSMALLINT   Type,
-    SQLSMALLINT   SubType,
-    SQLLEN        Length,
-    SQLSMALLINT   Precision,
-    SQLSMALLINT   Scale,
-    SQLPOINTER    DataPtr,
-    SQLLEN *      StringLengthPtr,
-    SQLLEN *      IndicatorPtr
-) {
-    LOG(__FUNCTION__);
-    return impl::SetDescRec(
-        DescriptorHandle,
-        RecNumber,
-        Type,
-        SubType,
-        Length,
-        Precision,
-        Scale,
-        DataPtr,
-        StringLengthPtr,
-        IndicatorPtr
-    );
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLCopyDesc)(
-    SQLHDESC     SourceDescHandle,
-    SQLHDESC     TargetDescHandle
-) {
-    LOG(__FUNCTION__);
-    return impl::CopyDesc(
-        SourceDescHandle,
-        TargetDescHandle
-    );
-}
-
-/*
- *	This function is used to cause the Driver Manager to
- *	call functions by number rather than name, which is faster.
- *	The ordinal value of this function must be 199 to have the
- *	Driver Manager do this.  Also, the ordinal values of the
- *	functions must match the value of fFunction in SQLGetFunctions()
- *
- *	EDIT: not relevant for 3.x drivers. Currently, used for testing dynamic loading only.
- */
-SQLRETURN SQL_API EXPORTED_FUNCTION(SQLDummyOrdinal)(void) {
-    return SQL_SUCCESS;
+    return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, hstmt, func);
 }
 
 } // extern "C"

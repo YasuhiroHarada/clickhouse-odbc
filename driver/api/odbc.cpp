@@ -1271,33 +1271,21 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLSpecialColumns)(HSTMT StatementHa
         const auto table = (TableName ? toUTF8(TableName, NameLength3) : "");
 
         std::stringstream query;
-        
-        // Handle different identifier types
+          // Handle different identifier types
         if (IdentifierType == SQL_BEST_ROWID || IdentifierType == SQL_ROWVER) {
-            // For ROWID/version columns, return primary key columns if available
-            // Otherwise return an empty result set
+            // ClickHouse sorting keys do not guarantee uniqueness like SQL PRIMARY KEYs,
+            // so we cannot provide them as row identifiers (ROWID).
+            // Return empty result set with proper structure to avoid misleading ODBC clients.
             query << "SELECT "
-                "cast(1, 'Int16') AS SCOPE, "  // SQL_SCOPE_SESSION
-                "cast(name, 'String') AS COLUMN_NAME, "
-                "cast(0, 'Int16') AS DATA_TYPE, "
-                "cast(type, 'String') AS TYPE_NAME, "
+                "cast(NULL, 'Nullable(Int16)') AS SCOPE, "
+                "cast(NULL, 'Nullable(String)') AS COLUMN_NAME, "
+                "cast(NULL, 'Nullable(Int16)') AS DATA_TYPE, "
+                "cast(NULL, 'Nullable(String)') AS TYPE_NAME, "
                 "cast(NULL, 'Nullable(Int32)') AS COLUMN_SIZE, "
-                "cast(0, 'Nullable(Int32)') AS BUFFER_LENGTH, "
+                "cast(NULL, 'Nullable(Int32)') AS BUFFER_LENGTH, "
                 "cast(NULL, 'Nullable(Int16)') AS DECIMAL_DIGITS, "
-                "cast(1, 'Int16') AS PSEUDO_COLUMN "  // SQL_PC_NOT_PSEUDO
-                "FROM system.columns "
-                "WHERE is_in_sorting_key = 1";
-
-            // Add filters based on provided parameters
-            if (!catalog.empty() && catalog != "%") {
-                query << " AND database = '" << escapeForSQL(catalog) << "'";
-            }
-            
-            if (!table.empty() && table != "%") {
-                query << " AND table = '" << escapeForSQL(table) << "'";
-            }
-
-            query << " ORDER BY position";
+                "cast(NULL, 'Nullable(Int16)') AS PSEUDO_COLUMN "
+                "WHERE (1 == 0)";
         } else {
             // For unknown identifier types, return empty result set with proper structure
             query << "SELECT "
@@ -1369,36 +1357,27 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLPrimaryKeys)(HSTMT hstmt,
     SQLSMALLINT cbSchemaName,
     SQLTCHAR * szTableName,
     SQLSMALLINT cbTableName) {
-    LOG(__FUNCTION__);
-
-    auto func = [&](Statement & statement) {
+    LOG(__FUNCTION__);    auto func = [&](Statement & statement) {
         const auto catalog = (szCatalogName ? toUTF8(szCatalogName, cbCatalogName) : statement.getParent().database);
         const auto schema = (szSchemaName ? toUTF8(szSchemaName, cbSchemaName) : "");
         const auto table = (szTableName ? toUTF8(szTableName, cbTableName) : "");
 
-        // Build query to retrieve primary key information
-        // ClickHouse uses sorting keys which can be considered as primary keys
+        // ClickHouse PRIMARY KEY does not guarantee uniqueness and allows duplicates
+        // This differs from standard SQL PRIMARY KEY semantics
+        // Return empty result set to avoid misleading ODBC clients about uniqueness constraints
         std::stringstream query;
         query << "SELECT "
-            "cast(database, 'Nullable(String)') AS TABLE_CAT, "
-            "cast('', 'Nullable(String)') AS TABLE_SCHEM, "
-            "cast(table, 'String') AS TABLE_NAME, "
-            "cast(name, 'String') AS COLUMN_NAME, "
-            "cast(position, 'Int16') AS KEY_SEQ, "
-            "cast('PRIMARY', 'Nullable(String)') AS PK_NAME "
-            "FROM system.columns "
-            "WHERE is_in_sorting_key = 1";
+            "cast(NULL, 'Nullable(String)') AS TABLE_CAT, "
+            "cast(NULL, 'Nullable(String)') AS TABLE_SCHEM, "
+            "cast(NULL, 'Nullable(String)') AS TABLE_NAME, "
+            "cast(NULL, 'Nullable(String)') AS COLUMN_NAME, "
+            "cast(NULL, 'Nullable(Int16)') AS KEY_SEQ, "
+            "cast(NULL, 'Nullable(String)') AS PK_NAME "
+            "WHERE 1=0"; // Return empty result set
 
-        // Add filters based on provided parameters
-        if (!catalog.empty() && catalog != "%") {
-            query << " AND database = '" << escapeForSQL(catalog) << "'";
-        }
-        
-        if (!table.empty() && table != "%") {
-            query << " AND table = '" << escapeForSQL(table) << "'";
-        }
-
-        query << " ORDER BY TABLE_CAT, TABLE_SCHEM, TABLE_NAME, KEY_SEQ";
+        // Note: ClickHouse sorting keys are not equivalent to SQL PRIMARY KEYs
+        // They do not enforce uniqueness and should not be reported as PRIMARY KEYs
+        // to maintain ODBC compliance and prevent client application confusion
 
         statement.executeQuery(query.str());
         return SQL_SUCCESS;
@@ -1445,26 +1424,24 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT hstmt,
     auto func = [&](Statement & statement) {
         const auto catalog = (szCatalogName ? toUTF8(szCatalogName, cbCatalogName) : statement.getParent().database);
         const auto schema = (szSchemaName ? toUTF8(szSchemaName, cbSchemaName) : "");
-        const auto table = (szTableName ? toUTF8(szTableName, cbTableName) : "");
-
-        std::stringstream query;
+        const auto table = (szTableName ? toUTF8(szTableName, cbTableName) : "");        std::stringstream query;
         
         // Build query to retrieve index/statistics information
-        // ClickHouse has different types of indexes and sorting keys
+        // ClickHouse sorting keys are NOT unique indexes - they allow duplicates
         query << "SELECT "
             "cast(database, 'Nullable(String)') AS TABLE_CAT, "
             "cast('', 'Nullable(String)') AS TABLE_SCHEM, "
             "cast(table, 'String') AS TABLE_NAME, "
-            "cast(0, 'Int16') AS NON_UNIQUE, "
+            "cast(1, 'Int16') AS NON_UNIQUE, "  // ClickHouse sorting keys are NOT unique
             "cast(NULL, 'Nullable(String)') AS INDEX_QUALIFIER, "
             "cast(CASE "
-                "WHEN is_in_sorting_key = 1 THEN 'PRIMARY' "
+                "WHEN is_in_sorting_key = 1 THEN 'SORTING_KEY' "  // Renamed from 'PRIMARY' to avoid confusion
                 "ELSE 'UNKNOWN' "
                 "END, 'Nullable(String)') AS INDEX_NAME, "
-            "cast(3, 'Int16') AS TYPE, "
+            "cast(3, 'Int16') AS TYPE, "  // SQL_INDEX_OTHER
             "cast(position, 'Int16') AS ORDINAL_POSITION, "
             "cast(name, 'Nullable(String)') AS COLUMN_NAME, "
-            "cast(NULL, 'Nullable(String)') AS ASC_OR_DESC, "
+            "cast('A', 'Nullable(String)') AS ASC_OR_DESC, "  // Assume ascending order
             "cast(0, 'Nullable(Int32)') AS CARDINALITY, "
             "cast(0, 'Nullable(Int32)') AS PAGES, "
             "cast(NULL, 'Nullable(String)') AS FILTER_CONDITION "
@@ -1479,7 +1456,7 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT hstmt,
             "cast(NULL, 'Nullable(Int16)') AS NON_UNIQUE, "
             "cast(NULL, 'Nullable(String)') AS INDEX_QUALIFIER, "
             "cast(NULL, 'Nullable(String)') AS INDEX_NAME, "
-            "cast(0, 'Int16') AS TYPE, "
+            "cast(0, 'Int16') AS TYPE, "  // SQL_TABLE_STAT
             "cast(NULL, 'Nullable(Int16)') AS ORDINAL_POSITION, "
             "cast(NULL, 'Nullable(String)') AS COLUMN_NAME, "
             "cast(NULL, 'Nullable(String)') AS ASC_OR_DESC, "
@@ -1487,9 +1464,7 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT hstmt,
             "cast(0, 'Nullable(Int32)') AS PAGES, "
             "cast(NULL, 'Nullable(String)') AS FILTER_CONDITION "
             "FROM system.tables "
-            "WHERE 1=1";
-
-        // Add filters based on provided parameters
+            "WHERE 1=1";        // Add filters based on provided parameters
         if (!catalog.empty() && catalog != "%") {
             query << " AND database = '" << escapeForSQL(catalog) << "'";
         }
@@ -1499,9 +1474,24 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT hstmt,
         }
 
         // Filter by uniqueness if requested
-        if (fUnique == 0) {
-            // Only return unique indexes (primary keys in ClickHouse case)
-            query << " AND (TYPE = 0 OR is_in_sorting_key = 1)";
+        if (fUnique == SQL_INDEX_UNIQUE) {
+            // ClickHouse sorting keys are NOT unique, so return empty result for unique index requests
+            query = std::stringstream();
+            query << "SELECT "
+                "cast(NULL, 'Nullable(String)') AS TABLE_CAT, "
+                "cast(NULL, 'Nullable(String)') AS TABLE_SCHEM, "
+                "cast(NULL, 'Nullable(String)') AS TABLE_NAME, "
+                "cast(NULL, 'Nullable(Int16)') AS NON_UNIQUE, "
+                "cast(NULL, 'Nullable(String)') AS INDEX_QUALIFIER, "
+                "cast(NULL, 'Nullable(String)') AS INDEX_NAME, "
+                "cast(NULL, 'Nullable(Int16)') AS TYPE, "
+                "cast(NULL, 'Nullable(Int16)') AS ORDINAL_POSITION, "
+                "cast(NULL, 'Nullable(String)') AS COLUMN_NAME, "
+                "cast(NULL, 'Nullable(String)') AS ASC_OR_DESC, "
+                "cast(NULL, 'Nullable(Int32)') AS CARDINALITY, "
+                "cast(NULL, 'Nullable(Int32)') AS PAGES, "
+                "cast(NULL, 'Nullable(String)') AS FILTER_CONDITION "
+                "WHERE 1=0"; // Return empty result set for unique indexes
         }
 
         query << " ORDER BY NON_UNIQUE, TYPE, INDEX_NAME, ORDINAL_POSITION";

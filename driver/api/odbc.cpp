@@ -1359,110 +1359,7 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLSpecialColumns)(HSTMT StatementHa
     return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, StatementHandle, func);
 }
 
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLForeignKeys)(HSTMT hstmt,
-    SQLTCHAR * szPkCatalogName,
-    SQLSMALLINT cbPkCatalogName,
-    SQLTCHAR * szPkSchemaName,
-    SQLSMALLINT cbPkSchemaName,
-    SQLTCHAR * szPkTableName,
-    SQLSMALLINT cbPkTableName,
-    SQLTCHAR * szFkCatalogName,
-    SQLSMALLINT cbFkCatalogName,
-    SQLTCHAR * szFkSchemaName,
-    SQLSMALLINT cbFkSchemaName,
-    SQLTCHAR * szFkTableName,
-    SQLSMALLINT cbFkTableName) {
-    LOG(__FUNCTION__);
-
-    auto func = [&](Statement & statement) {
-        // ClickHouse doesn't have traditional foreign key constraints
-        // Return an empty result set with proper column structure for ODBC compliance
-        std::stringstream query;
-        query << "SELECT "
-            "cast(NULL, 'Nullable(String)') AS PKTABLE_CAT, "
-            "cast(NULL, 'Nullable(String)') AS PKTABLE_SCHEM, "
-            "cast(NULL, 'Nullable(String)') AS PKTABLE_NAME, "
-            "cast(NULL, 'Nullable(String)') AS PKCOLUMN_NAME, "
-            "cast(NULL, 'Nullable(String)') AS FKTABLE_CAT, "
-            "cast(NULL, 'Nullable(String)') AS FKTABLE_SCHEM, "
-            "cast(NULL, 'Nullable(String)') AS FKTABLE_NAME, "
-            "cast(NULL, 'Nullable(String)') AS FKCOLUMN_NAME, "
-            "cast(NULL, 'Nullable(Int16)') AS KEY_SEQ, "
-            "cast(NULL, 'Nullable(Int16)') AS UPDATE_RULE, "
-            "cast(NULL, 'Nullable(Int16)') AS DELETE_RULE, "
-            "cast(NULL, 'Nullable(String)') AS FK_NAME, "
-            "cast(NULL, 'Nullable(String)') AS PK_NAME, "
-            "cast(NULL, 'Nullable(Int16)') AS DEFERRABILITY "
-            "WHERE 1=0"; // Always return empty result set
-
-        statement.executeQuery(query.str());
-        return SQL_SUCCESS;
-    };
-
-    return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, hstmt, func);
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLPrimaryKeys)(HSTMT hstmt,
-    SQLTCHAR * szCatalogName,
-    SQLSMALLINT cbCatalogName,
-    SQLTCHAR * szSchemaName,
-    SQLSMALLINT cbSchemaName,
-    SQLTCHAR * szTableName,
-    SQLSMALLINT cbTableName) {
-    LOG(__FUNCTION__);    auto func = [&](Statement & statement) {
-        const auto catalog = (szCatalogName ? toUTF8(szCatalogName, cbCatalogName) : statement.getParent().database);
-        const auto schema = (szSchemaName ? toUTF8(szSchemaName, cbSchemaName) : "");
-        const auto table = (szTableName ? toUTF8(szTableName, cbTableName) : "");
-
-        // ClickHouse PRIMARY KEY does not guarantee uniqueness and allows duplicates
-        // This differs from standard SQL PRIMARY KEY semantics
-        // Return empty result set to avoid misleading ODBC clients about uniqueness constraints
-        std::stringstream query;
-        query << "SELECT "
-            "cast(NULL, 'Nullable(String)') AS TABLE_CAT, "
-            "cast(NULL, 'Nullable(String)') AS TABLE_SCHEM, "
-            "cast(NULL, 'Nullable(String)') AS TABLE_NAME, "
-            "cast(NULL, 'Nullable(String)') AS COLUMN_NAME, "
-            "cast(NULL, 'Nullable(Int16)') AS KEY_SEQ, "
-            "cast(NULL, 'Nullable(String)') AS PK_NAME "
-            "WHERE 1=0"; // Return empty result set
-
-        // Note: ClickHouse sorting keys are not equivalent to SQL PRIMARY KEYs
-        // They do not enforce uniqueness and should not be reported as PRIMARY KEYs
-        // to maintain ODBC compliance and prevent client application confusion
-
-        statement.executeQuery(query.str());
-        return SQL_SUCCESS;
-    };
-
-    return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, hstmt, func);
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLProcedureColumns)(HSTMT hstmt,
-    SQLTCHAR * szCatalogName,
-    SQLSMALLINT cbCatalogName,
-    SQLTCHAR * szSchemaName,
-    SQLSMALLINT cbSchemaName,
-    SQLTCHAR * szProcName,
-    SQLSMALLINT cbProcName,
-    SQLTCHAR * szColumnName,
-    SQLSMALLINT cbColumnName) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLProcedures)(HSTMT hstmt,
-    SQLTCHAR * szCatalogName,
-    SQLSMALLINT cbCatalogName,
-    SQLTCHAR * szSchemaName,
-    SQLSMALLINT cbSchemaName,
-    SQLTCHAR * szProcName,
-    SQLSMALLINT cbProcName) {
-    LOG(__FUNCTION__);
-    return SQL_ERROR;
-}
-
-SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT hstmt,
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT StatementHandle,
     SQLTCHAR * szCatalogName,
     SQLSMALLINT cbCatalogName,
     SQLTCHAR * szSchemaName,
@@ -1552,7 +1449,384 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLStatistics)(HSTMT hstmt,
         return SQL_SUCCESS;
     };
 
+    return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, StatementHandle, func);
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLColumnPrivileges)(HSTMT StatementHandle,
+    SQLTCHAR * szCatalogName,
+    SQLSMALLINT cbCatalogName,
+    SQLTCHAR * szSchemaName,
+    SQLSMALLINT cbSchemaName,
+    SQLTCHAR * szTableName,
+    SQLSMALLINT cbTableName,
+    SQLTCHAR * szColumnName,
+    SQLSMALLINT cbColumnName) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLDescribeParam)(
+    SQLHSTMT        StatementHandle,
+    SQLUSMALLINT    ParameterNumber,
+    SQLSMALLINT *   DataTypePtr,
+    SQLULEN *       ParameterSizePtr,
+    SQLSMALLINT *   DecimalDigitsPtr,
+    SQLSMALLINT *   NullablePtr
+) {
+    LOG(__FUNCTION__);
+    return impl::DescribeParam(
+        StatementHandle,
+        ParameterNumber,
+        DataTypePtr,
+        ParameterSizePtr,
+        DecimalDigitsPtr,
+        NullablePtr
+    );
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLExtendedFetch)(
+    SQLHSTMT         StatementHandle,
+    SQLUSMALLINT     FetchOrientation,
+    SQLLEN           FetchOffset,
+    SQLULEN *        RowCountPtr,
+    SQLUSMALLINT *   RowStatusArray
+) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLForeignKeys)(HSTMT hstmt,
+    SQLTCHAR * szPkCatalogName,
+    SQLSMALLINT cbPkCatalogName,
+    SQLTCHAR * szPkSchemaName,
+    SQLSMALLINT cbPkSchemaName,
+    SQLTCHAR * szPkTableName,
+    SQLSMALLINT cbPkTableName,
+    SQLTCHAR * szFkCatalogName,
+    SQLSMALLINT cbFkCatalogName,
+    SQLTCHAR * szFkSchemaName,
+    SQLSMALLINT cbFkSchemaName,
+    SQLTCHAR * szFkTableName,
+    SQLSMALLINT cbFkTableName) {
+    LOG(__FUNCTION__);
+
+    auto func = [&](Statement & statement) {
+        // ClickHouse doesn't have traditional foreign key constraints
+        // Return an empty result set with proper column structure for ODBC compliance
+        std::stringstream query;
+        query << "SELECT "
+            "cast(NULL, 'Nullable(String)') AS PKTABLE_CAT, "
+            "cast(NULL, 'Nullable(String)') AS PKTABLE_SCHEM, "
+            "cast(NULL, 'Nullable(String)') AS PKTABLE_NAME, "
+            "cast(NULL, 'Nullable(String)') AS PKCOLUMN_NAME, "
+            "cast(NULL, 'Nullable(String)') AS FKTABLE_CAT, "
+            "cast(NULL, 'Nullable(String)') AS FKTABLE_SCHEM, "
+            "cast(NULL, 'Nullable(String)') AS FKTABLE_NAME, "
+            "cast(NULL, 'Nullable(String)') AS FKCOLUMN_NAME, "
+            "cast(NULL, 'Nullable(Int16)') AS KEY_SEQ, "
+            "cast(NULL, 'Nullable(Int16)') AS UPDATE_RULE, "
+            "cast(NULL, 'Nullable(Int16)') AS DELETE_RULE, "
+            "cast(NULL, 'Nullable(String)') AS FK_NAME, "
+            "cast(NULL, 'Nullable(String)') AS PK_NAME, "
+            "cast(NULL, 'Nullable(Int16)') AS DEFERRABILITY "
+            "WHERE 1=0"; // Always return empty result set
+
+        statement.executeQuery(query.str());
+        return SQL_SUCCESS;
+    };
+
     return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, hstmt, func);
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLPrimaryKeys)(HSTMT hstmt,
+    SQLTCHAR * szCatalogName,
+    SQLSMALLINT cbCatalogName,
+    SQLTCHAR * szSchemaName,
+    SQLSMALLINT cbSchemaName,
+    SQLTCHAR * szTableName,
+    SQLSMALLINT cbTableName) {
+    LOG(__FUNCTION__);
+
+    auto func = [&](Statement & statement) {
+        const auto catalog = (szCatalogName ? toUTF8(szCatalogName, cbCatalogName) : statement.getParent().database);
+        const auto schema = (szSchemaName ? toUTF8(szSchemaName, cbSchemaName) : "");
+        const auto table = (szTableName ? toUTF8(szTableName, cbTableName) : "");
+
+        // Build query to retrieve primary key information
+        // ClickHouse uses sorting keys which can be considered as primary keys
+        std::stringstream query;
+        query << "SELECT "
+            "cast(database, 'Nullable(String)') AS TABLE_CAT, "
+            "cast('', 'Nullable(String)') AS TABLE_SCHEM, "
+            "cast(table, 'String') AS TABLE_NAME, "
+            "cast(name, 'String') AS COLUMN_NAME, "
+            "cast(position, 'Int16') AS KEY_SEQ, "
+            "cast('PRIMARY', 'Nullable(String)') AS PK_NAME "
+            "FROM system.columns "
+            "WHERE is_in_sorting_key = 1";
+
+        // Add filters based on provided parameters
+        if (!catalog.empty() && catalog != "%") {
+            query << " AND database = '" << escapeForSQL(catalog) << "'";
+        }
+        
+        if (!table.empty() && table != "%") {
+            query << " AND table = '" << escapeForSQL(table) << "'";
+        }
+
+        query << " ORDER BY TABLE_CAT, TABLE_SCHEM, TABLE_NAME, KEY_SEQ";
+
+        statement.executeQuery(query.str());
+        return SQL_SUCCESS;
+    };
+
+    return CALL_WITH_TYPED_HANDLE(SQL_HANDLE_STMT, hstmt, func);
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLProcedureColumns)(HSTMT hstmt,
+    SQLTCHAR * szCatalogName,
+    SQLSMALLINT cbCatalogName,
+    SQLTCHAR * szSchemaName,
+    SQLSMALLINT cbSchemaName,
+    SQLTCHAR * szProcName,
+    SQLSMALLINT cbProcName,
+    SQLTCHAR * szColumnName,
+    SQLSMALLINT cbColumnName) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLProcedures)(HSTMT hstmt,
+    SQLTCHAR * szCatalogName,
+    SQLSMALLINT cbCatalogName,
+    SQLTCHAR * szSchemaName,
+    SQLSMALLINT cbSchemaName,
+    SQLTCHAR * szProcName,
+    SQLSMALLINT cbProcName) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLSetPos)(HSTMT hstmt, SQLSETPOSIROW irow, SQLUSMALLINT fOption, SQLUSMALLINT fLock) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLTablePrivileges)(HSTMT hstmt,
+    SQLTCHAR * szCatalogName,
+    SQLSMALLINT cbCatalogName,
+    SQLTCHAR * szSchemaName,
+    SQLSMALLINT cbSchemaName,
+    SQLTCHAR * szTableName,
+    SQLSMALLINT cbTableName) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLBindParameter)(
+    SQLHSTMT        StatementHandle,
+    SQLUSMALLINT    ParameterNumber,
+    SQLSMALLINT     InputOutputType,
+    SQLSMALLINT     ValueType,
+    SQLSMALLINT     ParameterType,
+    SQLULEN         ColumnSize,
+    SQLSMALLINT     DecimalDigits,
+    SQLPOINTER      ParameterValuePtr,
+    SQLLEN          BufferLength,
+    SQLLEN *        StrLen_or_IndPtr
+) {
+    LOG(__FUNCTION__);
+    return impl::BindParameter(
+        StatementHandle,
+        ParameterNumber,
+        InputOutputType,
+        ValueType,
+        ParameterType,
+        ColumnSize,
+        DecimalDigits,
+        ParameterValuePtr,
+        BufferLength,
+        StrLen_or_IndPtr
+    );
+}
+
+// Workaround for iODBC: when driver is in ODBCv3 mode, iODBC still probes for SQLBindParam() even though SQLBindParameter() is found.
+// It finds SQLBindParam(), but the actual functions pointer points to an fallback implementation of the Driver Manager itself (due to symbol resolution logic).
+// Moreover, the code still calls SQLBindParam() instead of SQLBindParameter(), causing invalid handle error due to masked handler.
+// TODO: review and report an error. Even if there is a problem in linkage, the login behind iODBC still seems to be faulty.
+// See SQLBindParameter_Internal() function defined in https://github.com/openlink/iODBC/blob/master/iodbc/prepare.c
+#if defined(WORKAROUND_ENABLE_DEFINE_SQLBindParam)
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLBindParam)(
+    SQLHSTMT        StatementHandle,
+    SQLUSMALLINT    ParameterNumber,
+    SQLSMALLINT     ValueType,
+    SQLSMALLINT     ParameterType,
+    SQLULEN         ColumnSize,
+    SQLSMALLINT     DecimalDigits,
+    SQLPOINTER      ParameterValuePtr,
+    SQLLEN *        StrLen_or_IndPtr
+) {
+    LOG(__FUNCTION__);
+    return impl::BindParameter(
+        StatementHandle,
+        ParameterNumber,
+        SQL_PARAM_INPUT,
+        ValueType,
+        ParameterType,
+        ColumnSize,
+        DecimalDigits,
+        ParameterValuePtr,
+        SQL_MAX_OPTION_STRING_LENGTH,
+        StrLen_or_IndPtr
+    );
+}
+#endif
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLBulkOperations)(
+    SQLHSTMT         StatementHandle,
+    SQLSMALLINT      Operation
+) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLCancelHandle)(SQLSMALLINT HandleType, SQLHANDLE Handle) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLCompleteAsync)(SQLSMALLINT HandleType, SQLHANDLE Handle, RETCODE * AsyncRetCodePtr) {
+    LOG(__FUNCTION__);
+    return SQL_ERROR;
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLEndTran)(
+    SQLSMALLINT     HandleType,
+    SQLHANDLE       Handle,
+    SQLSMALLINT     CompletionType
+) {
+    LOG(__FUNCTION__);
+    return impl::EndTran(
+        HandleType,
+        Handle,
+        CompletionType
+    );
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetDescField)(
+    SQLHDESC        DescriptorHandle,
+    SQLSMALLINT     RecNumber,
+    SQLSMALLINT     FieldIdentifier,
+    SQLPOINTER      ValuePtr,
+    SQLINTEGER      BufferLength,
+    SQLINTEGER *    StringLengthPtr
+) {
+    LOG(__FUNCTION__);
+    return impl::GetDescField(
+        DescriptorHandle,
+        RecNumber,
+        FieldIdentifier,
+        ValuePtr,
+        BufferLength,
+        StringLengthPtr
+    );
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetDescRec)(
+    SQLHDESC        DescriptorHandle,
+    SQLSMALLINT     RecNumber,
+    SQLTCHAR *      Name,
+    SQLSMALLINT     BufferLength,
+    SQLSMALLINT *   StringLengthPtr,
+    SQLSMALLINT *   TypePtr,
+    SQLSMALLINT *   SubTypePtr,
+    SQLLEN *        LengthPtr,
+    SQLSMALLINT *   PrecisionPtr,
+    SQLSMALLINT *   ScalePtr,
+    SQLSMALLINT *   NullablePtr
+) {
+    LOG(__FUNCTION__);
+    return impl::GetDescRec(
+        DescriptorHandle,
+        RecNumber,
+        Name,
+        BufferLength,
+        StringLengthPtr,
+        TypePtr,
+        SubTypePtr,
+        LengthPtr,
+        PrecisionPtr,
+        ScalePtr,
+        NullablePtr
+    );
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLSetDescField)(
+    SQLHDESC      DescriptorHandle,
+    SQLSMALLINT   RecNumber,
+    SQLSMALLINT   FieldIdentifier,
+    SQLPOINTER    ValuePtr,
+    SQLINTEGER    BufferLength
+) {
+    LOG(__FUNCTION__);
+    return impl::SetDescField(
+        DescriptorHandle,
+        RecNumber,
+        FieldIdentifier,
+        ValuePtr,
+        BufferLength
+    );
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLSetDescRec)(
+    SQLHDESC      DescriptorHandle,
+    SQLSMALLINT   RecNumber,
+    SQLSMALLINT   Type,
+    SQLSMALLINT   SubType,
+    SQLLEN        Length,
+    SQLSMALLINT   Precision,
+    SQLSMALLINT   Scale,
+    SQLPOINTER    DataPtr,
+    SQLLEN *      StringLengthPtr,
+    SQLLEN *      IndicatorPtr
+) {
+    LOG(__FUNCTION__);
+    return impl::SetDescRec(
+        DescriptorHandle,
+        RecNumber,
+        Type,
+        SubType,
+        Length,
+        Precision,
+        Scale,
+        DataPtr,
+        StringLengthPtr,
+        IndicatorPtr
+    );
+}
+
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLCopyDesc)(
+    SQLHDESC     SourceDescHandle,
+    SQLHDESC     TargetDescHandle
+) {
+    LOG(__FUNCTION__);
+    return impl::CopyDesc(
+        SourceDescHandle,
+        TargetDescHandle
+    );
+}
+
+/*
+ *	This function is used to cause the Driver Manager to
+ *	call functions by number rather than name, which is faster.
+ *	The ordinal value of this function must be 199 to have the
+ *	Driver Manager do this.  Also, the ordinal values of the
+ *	functions must match the value of fFunction in SQLGetFunctions()
+ *
+ *	EDIT: not relevant for 3.x drivers. Currently, used for testing dynamic loading only.
+ */
+SQLRETURN SQL_API EXPORTED_FUNCTION(SQLDummyOrdinal)(void) {
+    return SQL_SUCCESS;
 }
 
 } // extern "C"

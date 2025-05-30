@@ -48,8 +48,24 @@ void SQLColumnsResultSetMutator::transformRow(const std::vector<ColumnInfo> & /*
     const auto & type_name = type_name_wrapper.value;
     const auto column_info = parseColumnType(type_name);
     const TypeInfo & type_info = statement.getTypeInfo(column_info.type, column_info.type_without_parameters);
-    row.fields.at(COL_DATA_TYPE).data = DataSourceType<DataSourceTypeId::Int16>{type_info.data_type};
-    row.fields.at(COL_TYPE_NAME).data = DataSourceType<DataSourceTypeId::String>{type_info.type_name};
+    
+    // MS Access compatibility fixes
+    SQLSMALLINT access_data_type = type_info.data_type;
+    std::string access_type_name = type_info.type_name;
+    
+    // Fix String types for MS Access compatibility
+    if (type_info.type_id == String || type_info.type_id == FixedString || type_info.type_id == Array) {
+        if (column_info.is_nullable) {
+            access_data_type = SQL_VARCHAR;
+            access_type_name = "VARCHAR";
+        } else {
+            access_data_type = SQL_VARCHAR;
+            access_type_name = "VARCHAR";
+        }
+    }
+    
+    row.fields.at(COL_DATA_TYPE).data = DataSourceType<DataSourceTypeId::Int16>{access_data_type};
+    row.fields.at(COL_TYPE_NAME).data = DataSourceType<DataSourceTypeId::String>{access_type_name};
 
     int column_size{};
     switch (type_info.type_id) {
@@ -58,6 +74,11 @@ void SQLColumnsResultSetMutator::transformRow(const std::vector<ColumnInfo> & /*
             break;
         case FixedString:
             column_size = column_info.fixed_size;
+            break;
+        case String:
+        case Array:
+            // MS Access compatible string size - limit to reasonable value
+            column_size = 255;  // Standard VARCHAR size that MS Access handles well
             break;
         default:
             column_size = type_info.column_size;
@@ -68,7 +89,8 @@ void SQLColumnsResultSetMutator::transformRow(const std::vector<ColumnInfo> & /*
     if (type_info.num_prec_radix.has_value())
         row.fields.at(COL_NUM_PREC_RADIX).data = DataSourceType<DataSourceTypeId::Int16>{*type_info.num_prec_radix};
 
-    row.fields.at(COL_NULLABLE).data = DataSourceType<DataSourceTypeId::Int16>{column_info.is_nullable};
+    // MS Access expects standard ODBC NULLABLE values
+    row.fields.at(COL_NULLABLE).data = DataSourceType<DataSourceTypeId::Int16>{column_info.is_nullable ? SQL_NULLABLE : SQL_NO_NULLS};
 
     if (type_info.type_id == Decimal)
         row.fields.at(COL_DECIMAL_DIGITS).data = DataSourceType<DataSourceTypeId::Int16>{column_info.scale};
@@ -82,7 +104,15 @@ void SQLColumnsResultSetMutator::transformRow(const std::vector<ColumnInfo> & /*
     if (type_info.sql_datetime_sub.has_value())
         row.fields.at(COL_SQL_DATETIME_SUB).data = DataSourceType<DataSourceTypeId::Int16>{*type_info.sql_datetime_sub};
 
-    row.fields.at(COL_CHAR_OCTET_LENGTH).data = DataSourceType<DataSourceTypeId::Int32>{type_info.octet_length};
+    // MS Access compatible octet length for string types
+    int octet_length = type_info.octet_length;
+    if (type_info.type_id == String || type_info.type_id == Array) {
+        octet_length = column_size;  // Use same as column_size for string types
+    } else if (type_info.type_id == FixedString) {
+        octet_length = column_info.fixed_size;
+    }
+    
+    row.fields.at(COL_CHAR_OCTET_LENGTH).data = DataSourceType<DataSourceTypeId::Int32>{octet_length};
 
     row.fields.at(COL_IS_NULLABLE).data = DataSourceType<DataSourceTypeId::String>{column_info.is_nullable ? "YES" : "NO"};
 }

@@ -1,5 +1,4 @@
 #include "driver/api/sql_columns_resultset_mutator.h"
-#include <algorithm>  // for std::min
 
 // Column position numbers as described in
 // https://learn.microsoft.com/en-us/sql/odbc/reference/syntax/sqlcolumns-function

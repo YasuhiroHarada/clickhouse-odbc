@@ -267,10 +267,10 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetInfo)(
 
             CASE_NUM(SQL_SQL92_NUMERIC_VALUE_FUNCTIONS,
                 SQLUINTEGER,
-                SQL_FN_NUM_ABS | SQL_FN_NUM_ACOS | SQL_FN_NUM_ASIN | SQL_FN_NUM_ATAN | SQL_FN_NUM_ATAN2 | SQL_FN_NUM_CEILING
-                    | SQL_FN_NUM_COS | SQL_FN_NUM_COT | SQL_FN_NUM_DEGREES | SQL_FN_NUM_EXP | SQL_FN_NUM_FLOOR | SQL_FN_NUM_LOG
-                    | SQL_FN_NUM_LOG10 | SQL_FN_NUM_MOD | SQL_FN_NUM_PI | SQL_FN_NUM_POWER | SQL_FN_NUM_RADIANS | SQL_FN_NUM_RAND
-                    | SQL_FN_NUM_ROUND | SQL_FN_NUM_SIGN | SQL_FN_NUM_SIN | SQL_FN_NUM_SQRT | SQL_FN_NUM_TAN | SQL_FN_NUM_TRUNCATE)            CASE_NUM(SQL_SQL92_PREDICATES,
+                SQL_SNVF_BIT_LENGTH | SQL_SNVF_CHAR_LENGTH | SQL_SNVF_CHARACTER_LENGTH | SQL_SNVF_EXTRACT | SQL_SNVF_OCTET_LENGTH
+                    | SQL_SNVF_POSITION)                
+
+            CASE_NUM(SQL_SQL92_PREDICATES,
                 SQLUINTEGER,
                 SQL_SP_BETWEEN | SQL_SP_COMPARISON | SQL_SP_EXISTS | SQL_SP_IN | SQL_SP_ISNOTNULL | SQL_SP_ISNULL | SQL_SP_LIKE
                     | SQL_SP_MATCH_FULL | SQL_SP_MATCH_PARTIAL | SQL_SP_MATCH_UNIQUE_FULL | SQL_SP_MATCH_UNIQUE_PARTIAL | SQL_SP_OVERLAPS
@@ -896,11 +896,11 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLTables)(
             query << " CAST('TABLE', 'Nullable(String)') AS TABLE_TYPE,";
             query << " CAST(NULL, 'Nullable(String)') AS REMARKS";
             query << " FROM system.tables";
-            // catalog（データベース名）で絞り込み
+            
+            // Filter by catalog (database name)
             if (!catalog.empty() && catalog != "%") {
                 query << " WHERE database = '" << escapeForSQL(catalog) << "'";
-            }
-            // 既存のパターン条件も追加する場合はここに追記
+            }            
         }
 
         query << " ORDER BY TABLE_TYPE, TABLE_CAT, TABLE_SCHEM, TABLE_NAME";

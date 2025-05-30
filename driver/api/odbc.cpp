@@ -12,7 +12,6 @@
 #include "driver/descriptor.h"
 #include "driver/statement.h"
 #include "driver/result_set.h"
-#include "driver/exception.h"
 
 #include <Poco/Net/HTTPClientSession.h>
 #include <Poco/NumberFormatter.h>
@@ -268,7 +267,7 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetInfo)(
             CASE_NUM(SQL_SQL92_NUMERIC_VALUE_FUNCTIONS,
                 SQLUINTEGER,
                 SQL_SNVF_BIT_LENGTH | SQL_SNVF_CHAR_LENGTH | SQL_SNVF_CHARACTER_LENGTH | SQL_SNVF_EXTRACT | SQL_SNVF_OCTET_LENGTH
-                    | SQL_SNVF_POSITION)                
+                    | SQL_SNVF_POSITION)
 
             CASE_NUM(SQL_SQL92_PREDICATES,
                 SQLUINTEGER,
@@ -398,7 +397,7 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLGetInfo)(
 #endif
 
             default:
-                throw SqlException("Unsupported info type: " + std::to_string(info_type), "HY092");
+                throw std::runtime_error("Unsupported info type: " + std::to_string(info_type));
 
 #undef CASE_STRING
 
@@ -896,10 +895,63 @@ SQLRETURN SQL_API EXPORTED_FUNCTION_MAYBE_W(SQLTables)(
             query << " CAST('TABLE', 'Nullable(String)') AS TABLE_TYPE,";
             query << " CAST(NULL, 'Nullable(String)') AS REMARKS";
             query << " FROM system.tables";
+            query << " WHERE (1 == 1)";
+
+            // Completely ommit the condition part of the query, if the value of SQL_ATTR_METADATA_ID is SQL_TRUE
+            // (i.e., values for the components are not patterns), and the component hasn't been supplied at all
+            // (i.e. is nullptr; note, that actual empty strings are considered "supplied".)
+
+            const auto is_odbc_v2 = (statement.getParent().getParent().odbc_version == SQL_OV_ODBC2);
+            const auto is_pattern = (statement.getParent().getAttrAs<SQLUINTEGER>(SQL_ATTR_METADATA_ID, SQL_FALSE) != SQL_TRUE);
+            const auto table_types = parseCatalogFnVLArgs(table_type_list);
+
+            // TODO: Use of coalesce() is a workaround here. Review.
+
+            // Note, that 'catalog' variable will be set to "%" above (or to the connected database name), even if CatalogName == nullptr.
+            if (is_pattern && !is_odbc_v2) {
+                if (!isMatchAnythingCatalogFnPatternArg(catalog))
+                    query << " AND isNotNull(TABLE_CAT) AND coalesce(TABLE_CAT, '') LIKE '" << escapeForSQL(catalog) << "'";
+            }
+            else if (CatalogName) {
+                query << " AND isNotNull(TABLE_CAT) AND coalesce(TABLE_CAT, '') == '" << escapeForSQL(catalog) << "'";
+            }
+
+            // Note, that 'schema' variable will be set to "%" above, even if SchemaName == nullptr.
+            if (is_pattern) {
+                if (!isMatchAnythingCatalogFnPatternArg(schema))
+                    query << " AND isNotNull(TABLE_SCHEM) AND coalesce(TABLE_SCHEM, '') LIKE '" << escapeForSQL(schema) << "'";
+            }
+            else if (SchemaName) {
+                query << " AND isNotNull(TABLE_SCHEM) AND coalesce(TABLE_SCHEM, '') == '" << escapeForSQL(schema) << "'";
+            }
+
+            // Note, that 'table' variable will be set to "%" above, even if TableName == nullptr.
+            if (is_pattern) {
+                if (!isMatchAnythingCatalogFnPatternArg(table))
+                    query << " AND isNotNull(TABLE_NAME) AND coalesce(TABLE_NAME, '') LIKE '" << escapeForSQL(table) << "'";
+            }
+            else if (TableName) {
+                query << " AND isNotNull(TABLE_NAME) AND coalesce(TABLE_NAME, '') == '" << escapeForSQL(table) << "'";
+            }
+
+            // Table type list is not affected by the value of SQL_ATTR_METADATA_ID, so we always treat it as a list of patterns.
+            if (!table_types.empty()) {
+                bool has_match_anything = false;
+                for (const auto & table_type : table_types) {
+                    has_match_anything = has_match_anything || isMatchAnythingCatalogFnPatternArg(table_type);
+                }
+                if (!has_match_anything) {
+                    query << " AND isNotNull(TABLE_TYPE) AND (1 == 0";
+                    for (const auto & table_type : table_types) {
+                        query << " OR coalesce(TABLE_TYPE, '') LIKE '" << escapeForSQL(table_type) << "'";
+                    }
+                    query << ")";
+                }
+            }
             
             // Filter by catalog (database name)
             if (!catalog.empty() && catalog != "%") {
-                query << " WHERE database = '" << escapeForSQL(catalog) << "'";
+                query << " AND database = '" << escapeForSQL(catalog) << "'";
             }            
         }
 

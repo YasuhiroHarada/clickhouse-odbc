@@ -130,6 +130,7 @@ protected:
     bool finished = false;
     ObjectPool<std::string> string_pool;
     ObjectPool<Row> row_pool;
+    std::size_t total_processed_rows = 0;  // GC用の処理済み行数カウンタ
 
 private:
     void performDatasetGarbageCollection();

@@ -216,8 +216,6 @@ SQLRETURN ResultSet::extractField(std::size_t row_idx, std::size_t column_idx, B
 }
 
 void ResultSet::tryPrefetchRows(std::size_t size) {
-    static std::size_t total_processed_rows = 0;
-    
     while (!finished && prefetched_rows.size() < size) {
         ++total_processed_rows;
         if ((total_processed_rows % 10000) == 0) {

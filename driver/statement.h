@@ -6,6 +6,7 @@
 #include "driver/result_set.h"
 
 #include <Poco/Net/HTTPResponse.h>
+#include <Poco/Net/HTTPClientSession.h>
 
 #include <memory>
 #include <sstream>
@@ -110,6 +111,9 @@ private:
     std::string query;
     std::vector<ParamInfo> parameters;
 
+    // Independent HTTP session for each statement to avoid concurrent access issues
+    std::unique_ptr<Poco::Net::HTTPClientSession> statement_session;
+    
     std::unique_ptr<Poco::Net::HTTPResponse> response;
     std::istream* in = nullptr;
     std::unique_ptr<ResultReader> result_reader;

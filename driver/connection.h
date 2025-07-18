@@ -57,6 +57,13 @@ public:
     const TypeInfo & getTypeInfo(const std::string & type_name, const std::string & type_name_without_parameters) const;
 
     Poco::URI getUri() const;
+    
+    // Getters for session configuration
+    int getConnectionTimeout() const { return connection_timeout; }
+    int getTimeout() const { return timeout; }
+    const std::string& getProto() const { return proto; }
+    const std::string& getServer() const { return server; }
+    int getPort() const { return port; }
 
     void connect(const std::string & connection_string);
 

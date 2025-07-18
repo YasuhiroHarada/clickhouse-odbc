@@ -6,6 +6,9 @@
 
 #include <Poco/Exception.h>
 #include <Poco/Net/HTTPClientSession.h>
+#if !defined(WORKAROUND_DISABLE_SSL)
+#include <Poco/Net/HTTPSClientSession.h>
+#endif
 #include <Poco/Net/HTTPRequest.h>
 #include <Poco/Timezone.h>
 #include <Poco/URI.h>
@@ -19,6 +22,29 @@ Statement::Statement(Connection & connection)
     : ChildType(connection)
 {
     allocateImplicitDescriptors();
+    
+    // Create independent HTTP session for this statement to avoid concurrent access issues
+    auto& conn = getParent();
+    
+#if !defined(WORKAROUND_DISABLE_SSL)
+    const auto is_ssl = (Poco::UTF8::icompare(conn.getProto(), "https") == 0);
+    statement_session = (
+        is_ssl ? std::make_unique<Poco::Net::HTTPSClientSession>() :
+        std::make_unique<Poco::Net::HTTPClientSession>()
+    );
+#else
+    statement_session = std::make_unique<Poco::Net::HTTPClientSession>();
+#endif
+    
+    statement_session->setHost(conn.getServer());
+    statement_session->setPort(conn.getPort());
+    statement_session->setKeepAlive(true);
+    statement_session->setTimeout(
+        Poco::Timespan(conn.getConnectionTimeout(), 0), 
+        Poco::Timespan(conn.getTimeout(), 0), 
+        Poco::Timespan(conn.getTimeout(), 0)
+    );
+    statement_session->setKeepAliveTimeout(Poco::Timespan(86400, 0));
 }
 
 Statement::~Statement() {
@@ -108,9 +134,9 @@ void Statement::requestNextPackOfResultSets(std::unique_ptr<ResultMutator> && mu
 
     auto & connection = getParent();
 
-    if (connection.session && response && in)
+    if (statement_session && response && in)
         if (in->fail() || !in->eof())
-            connection.session->reset();
+            statement_session->reset();
 
     const auto [prepared_query, query_parameters] = prepareHttpRequest();
     Poco::URI uri = connection.getUri();
@@ -142,25 +168,25 @@ void Statement::requestNextPackOfResultSets(std::unique_ptr<ResultMutator> && mu
     for (int i = 1;; ++i) {
         try {
             for (; redirect_count < connection.redirect_limit; ++redirect_count) {
-                connection.session->sendRequest(request) << prepared_query;
+                statement_session->sendRequest(request) << prepared_query;
                 response = std::make_unique<Poco::Net::HTTPResponse>();
-                in = &connection.session->receiveResponse(*response);
+                in = &statement_session->receiveResponse(*response);
                 auto status = response->getStatus();
                 if (status != Poco::Net::HTTPResponse::HTTP_PERMANENT_REDIRECT && status != Poco::Net::HTTPResponse::HTTP_TEMPORARY_REDIRECT) {
                     break;
                 }
-                connection.session->reset(); // reset keepalived connection
+                statement_session->reset(); // reset keepalived connection
                 auto newLocation = response->get("Location");
                 LOG("Redirected to " << newLocation << ", redirect index=" << redirect_count + 1 << "/" << connection.redirect_limit);
                 uri = newLocation;
-                connection.session->setHost(uri.getHost());
-                connection.session->setPort(uri.getPort());
+                statement_session->setHost(uri.getHost());
+                statement_session->setPort(uri.getPort());
                 request.setHost(uri.getHost());
                 request.setURI(uri.getPathEtc());
             }
             break;
         } catch (const Poco::IOException & e) {
-            connection.session->reset(); // reset keepalived connection
+            statement_session->reset(); // reset keepalived connection
             LOG("Http request try=" << i << "/" << connection.retry_count << " failed: " << e.what() << ": " << e.message());
             if (i > connection.retry_count)
                 throw;
@@ -376,9 +402,9 @@ bool Statement::advanceToNextResultSet() {
 
 void Statement::closeCursor() {
     auto & connection = getParent();
-    if (connection.session && response && in) {
+    if (statement_session && response && in) {
         if (in->fail() || !in->eof())
-            connection.session->reset();
+            statement_session->reset();
     }
 
     result_reader.reset();

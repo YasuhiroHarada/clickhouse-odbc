@@ -33,6 +33,14 @@ public:
         }
     }
 
+    std::size_t getSize() const {
+        return cache_.size();
+    }
+
+    void clear() {
+        cache_.clear();
+    }
+
 private:
     const std::size_t max_size_;
     std::deque<T> cache_;

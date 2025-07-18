@@ -130,6 +130,9 @@ protected:
     bool finished = false;
     ObjectPool<std::string> string_pool;
     ObjectPool<Row> row_pool;
+
+private:
+    void performDatasetGarbageCollection();
 };
 
 class ResultReader {

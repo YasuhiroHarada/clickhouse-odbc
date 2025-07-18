@@ -1,6 +1,7 @@
 #include "driver/result_set.h"
 #include "driver/format/ODBCDriver2.h"
 #include "driver/format/RowBinaryWithNamesAndTypes.h"
+#include <algorithm>
 
 const std::string::size_type initial_string_capacity_g = std::string{}.capacity();
 
@@ -166,7 +167,7 @@ std::size_t ResultSet::fetchRowSet(SQLSMALLINT orientation, SQLLEN offset, std::
     if (prefetched_rows.size() < size) {
         constexpr std::size_t prefetch_at_least = 100;
         tryPrefetchRows(std::max(size, prefetch_at_least));
-    }
+   }
 
     for (std::size_t i = 0; i < size && !prefetched_rows.empty(); ++i) {
         row_set.emplace_back(std::move(prefetched_rows.front()));
@@ -215,7 +216,14 @@ SQLRETURN ResultSet::extractField(std::size_t row_idx, std::size_t column_idx, B
 }
 
 void ResultSet::tryPrefetchRows(std::size_t size) {
+    static std::size_t total_processed_rows = 0;
+    
     while (!finished && prefetched_rows.size() < size) {
+        ++total_processed_rows;
+        if ((total_processed_rows % 10000) == 0) {
+            performDatasetGarbageCollection();
+        }
+        
         prefetched_rows.emplace_back(row_pool.get());
 
         auto & row = prefetched_rows.back();
@@ -335,4 +343,18 @@ std::unique_ptr<ResultReader> make_result_reader(const std::string & format, con
     }
 
     throw std::runtime_error("'" + format + "' format is not supported");
+}
+
+void ResultSet::performDatasetGarbageCollection() {
+    const std::size_t max_row_set_size = 100;
+    while (row_set.size() > max_row_set_size) {
+        retireRow(std::move(row_set.front()));
+        row_set.pop_front();
+    }
+    
+    const std::size_t max_prefetch_size = 50;
+    while (prefetched_rows.size() > max_prefetch_size) {
+        retireRow(std::move(prefetched_rows.back()));
+        prefetched_rows.pop_back();
+    }
 }

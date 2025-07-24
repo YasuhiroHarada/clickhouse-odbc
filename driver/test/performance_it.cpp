@@ -60,12 +60,12 @@ TEST_F(PerformanceTest, ENABLE_FOR_OPTIMIZED_BUILDS_ONLY(UnimplementedAPICallOve
     constexpr std::size_t call_count = 1'000'000;
     auto tstr = fromUTF8<PTChar>("");
 
-    // Verify that SQLStatistics() is not implemented. Change to something else when implemented.
+    // Verify that SQLTablePrivileges() is not implemented. Change to something else when implemented.
     {
-        const auto rc = SQLStatistics(hstmt, ptcharCast(tstr.data()), 0, ptcharCast(tstr.data()), 0, ptcharCast(tstr.data()), 0, SQL_INDEX_ALL, SQL_ENSURE);
+        const auto rc = SQLTablePrivileges(hstmt, ptcharCast(tstr.data()), 0, ptcharCast(tstr.data()), 0, ptcharCast(tstr.data()), 0);
         if (rc != SQL_ERROR) {
             throw std::runtime_error(
-                "SQLStatistics return code: " + std::to_string(rc) +
+                "SQLTablePrivileges return code: " + std::to_string(rc) +
                 ", expected SQL_ERROR (" + std::to_string(SQL_ERROR) +
                 ") - a function that is not implemented by the driver"
             );

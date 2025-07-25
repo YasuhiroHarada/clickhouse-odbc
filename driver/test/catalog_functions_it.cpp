@@ -1,7 +1,5 @@
-#include <format>
 #include <string>
 #include <vector>
-#include <iostream>
 #include <gtest/gtest.h>
 
 #include "driver/test/client_test_base.h"
@@ -9,18 +7,7 @@
 #include "driver/test/result_set_reader.hpp"
 #include "driver/utils/sql_encoding.h"
 
-// Integration tests for ODBC catalog functions that were recently implemented:
-// - SQLSpecialColumns: Returns schema metadata for special columns (currently returns empty result set)
-// - SQLStatistics: Returns index and statistics information from system.data_skipping_indices
-// These tests verify that the functions are callable, return correct result set structure,
-// and handle various parameter combinations correctly.
-//
-// Cross-platform compatibility:
-// - Uses ODBC standard types (SQLTCHAR, PTChar) for Windows/Linux compatibility
-// - Error handling accounts for different ODBC driver manager behaviors
-// - String encoding handled via toUTF8/fromUTF8 utility functions
-// - Tests designed to work with both unixODBC (Linux) and Windows ODBC drivers
-
+// Integration tests for ODBC catalog functions SQLSpecialColumns and SQLStatistics
 class CatalogFunctionsTest
     : public ClientTestBase
 {
@@ -77,7 +64,6 @@ TEST_F(CatalogFunctionsTest, SQLSpecialColumns)
     // The result should be empty since implementation returns WHERE 1 == 0
     rc = SQLFetch(hstmt);
     EXPECT_EQ(rc, SQL_NO_DATA);
-    std::cout << "SQLSpecialColumns correctly returned empty result set" << std::endl;
 
     ODBC_CALL_ON_STMT_THROW(hstmt, SQLFreeStmt(hstmt, SQL_CLOSE));
 }
@@ -149,14 +135,7 @@ TEST_F(CatalogFunctionsTest, SQLStatistics)
         EXPECT_TRUE(non_unique.has_value());
         EXPECT_TRUE(type.has_value());
 
-        // Log some details for debugging
-        if (table_cat.has_value() && table_name.has_value()) {
-            std::cout << "Found index: catalog=" << table_cat.value() 
-                      << ", table=" << table_name.value() << std::endl;
         }
-    }
-    
-    std::cout << "Total rows returned by SQLStatistics: " << row_count << std::endl;
 
     ODBC_CALL_ON_STMT_THROW(hstmt, SQLFreeStmt(hstmt, SQL_CLOSE));
 }
@@ -309,13 +288,11 @@ TEST_F(CatalogFunctionsTest, SQLGetFunctionsSupport)
     rc = SQLGetFunctions(hdbc, SQL_API_SQLSPECIALCOLUMNS, &supported);
     EXPECT_EQ(rc, SQL_SUCCESS);
     EXPECT_EQ(supported, SQL_TRUE);
-    std::cout << "SQLSpecialColumns support: " << (supported ? "YES" : "NO") << std::endl;
 
     // Test SQLStatistics support
     rc = SQLGetFunctions(hdbc, SQL_API_SQLSTATISTICS, &supported);
     EXPECT_EQ(rc, SQL_SUCCESS);
     EXPECT_EQ(supported, SQL_TRUE);
-    std::cout << "SQLStatistics support: " << (supported ? "YES" : "NO") << std::endl;
 }
 
 // Test SQLStatistics with actual data skipping index
@@ -345,10 +322,10 @@ TEST_F(CatalogFunctionsTest, SQLStatisticsWithDataSkippingIndex)
         try {
             ODBC_CALL_ON_STMT_THROW(hstmt, SQLExecDirect(hstmt, ptcharCast(create_index_query.data()), SQL_NTS));
             ODBC_CALL_ON_STMT_THROW(hstmt, SQLFreeStmt(hstmt, SQL_CLOSE));
-            std::cout << "Successfully created data skipping index" << std::endl;
+            // Index creation succeeded
         } catch (const std::exception& e) {
             // If index creation fails due to permissions, skip this part
-            std::cout << "Index creation failed (likely permissions): " << e.what() << std::endl;
+            std::cout << "Index creation failed (permissions): skipping index test" << std::endl;
             ODBC_CALL_ON_STMT_THROW(hstmt, SQLFreeStmt(hstmt, SQL_CLOSE));
         }
 
@@ -382,12 +359,9 @@ TEST_F(CatalogFunctionsTest, SQLStatisticsWithDataSkippingIndex)
             if (table_name.has_value() && table_name.value() == "test_index_table") {
                 index_count++;
                 if (index_name.has_value()) {
-                    std::cout << "Found index: " << index_name.value() << std::endl;
                 }
             }
         }
-        std::cout << "Total indices found for test_index_table: " << index_count << std::endl;
-
         ODBC_CALL_ON_STMT_THROW(hstmt, SQLFreeStmt(hstmt, SQL_CLOSE));
 
         // Clean up - always try to drop the table
@@ -397,7 +371,7 @@ TEST_F(CatalogFunctionsTest, SQLStatisticsWithDataSkippingIndex)
 
     } catch (const std::exception& e) {
         // If table creation fails, skip the entire test
-        std::cout << "Table creation failed, skipping test: " << e.what() << std::endl;
+        std::cout << "Table creation failed, skipping test" << std::endl;
         ODBC_CALL_ON_STMT_THROW(hstmt, SQLFreeStmt(hstmt, SQL_CLOSE));
         
         // Still clean up just in case

@@ -1,5 +1,6 @@
 #include "driver/format/RowBinaryWithNamesAndTypes.h"
 #include "driver/utils/resize_without_initialization.h"
+#include "driver/utils/conversion_std.h"
 
 #include <ctime>
 
@@ -228,7 +229,12 @@ void RowBinaryWithNamesAndTypesResultSet::readValue(DataSourceType<DataSourceTyp
         value_manip::to_null(dest.value);
     }
 
-    readValue(dest.value, column_info.fixed_size);
+    // Read raw string data first
+    std::string raw_value;
+    readValue(raw_value, column_info.fixed_size);
+    
+    // Apply UTF-8 validation and sanitization for Microsoft Access compatibility
+    dest.value = toUTF8(raw_value.c_str(), static_cast<SQLLEN>(raw_value.length()));
 
     if (column_info.display_size_so_far < dest.value.size())
         column_info.display_size_so_far = dest.value.size();
@@ -268,7 +274,12 @@ void RowBinaryWithNamesAndTypesResultSet::readValue(DataSourceType<DataSourceTyp
         value_manip::to_null(dest.value);
     }
 
-    readValue(dest.value);
+    // Read raw string data first
+    std::string raw_value;
+    readValue(raw_value);
+    
+    // Apply UTF-8 validation and sanitization for Microsoft Access compatibility
+    dest.value = toUTF8(raw_value.c_str(), static_cast<SQLLEN>(raw_value.length()));
 
     if (column_info.display_size_so_far < dest.value.size())
         column_info.display_size_so_far = dest.value.size();

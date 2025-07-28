@@ -195,6 +195,10 @@ elseif (OS_WINDOWS)
     target_link_libraries (${libname}-impl
         PRIVATE ODBC::Driver
     )
+    
+    target_link_libraries (${libname}-impl
+        PRIVATE odbccp32
+    )
 endif()
 
 

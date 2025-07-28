@@ -1,5 +1,6 @@
 #include "driver/format/ODBCDriver2.h"
 #include "driver/utils/resize_without_initialization.h"
+#include "driver/utils/conversion_std.h"
 
 ODBCDriver2ResultSet::ODBCDriver2ResultSet(const std::string & timezone, AmortizedIStreamReader & stream, std::unique_ptr<ResultMutator> && mutator)
     : ResultSet(stream, std::move(mutator))
@@ -190,7 +191,7 @@ void ODBCDriver2ResultSet::readValue(std::string & src, DataSourceType<DataSourc
 }
 
 void ODBCDriver2ResultSet::readValue(std::string & src, DataSourceType<DataSourceTypeId::FixedString> & dest, ColumnInfo & column_info) {
-    dest.value = std::move(src);
+    dest.value = toUTF8(src.c_str(), static_cast<SQLLEN>(src.length()));
 }
 
 void ODBCDriver2ResultSet::readValue(std::string & src, DataSourceType<DataSourceTypeId::Float32> & dest, ColumnInfo & column_info) {
@@ -222,7 +223,8 @@ void ODBCDriver2ResultSet::readValue(std::string & src, DataSourceType<DataSourc
 }
 
 void ODBCDriver2ResultSet::readValue(std::string & src, DataSourceType<DataSourceTypeId::String> & dest, ColumnInfo & column_info) {
-    dest.value = std::move(src);
+    // Apply UTF-8 validation and sanitization for Microsoft Access compatibility
+    dest.value = toUTF8(src.c_str(), static_cast<SQLLEN>(src.length()));
 }
 
 void ODBCDriver2ResultSet::readValue(std::string & src, DataSourceType<DataSourceTypeId::UInt8> & dest, ColumnInfo & column_info) {
